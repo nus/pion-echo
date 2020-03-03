@@ -125,6 +125,7 @@ func messageReceiver(conn *websocket.Conn, msgch chan message) {
 func main() {
 	m := webrtc.MediaEngine{}
 	m.RegisterCodec(webrtc.NewRTPVP8Codec(webrtc.DefaultPayloadTypeVP8, 90000))
+	m.RegisterCodec(webrtc.NewRTPOpusCodec(webrtc.DefaultPayloadTypeOpus, 48000))
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
 
@@ -160,8 +161,8 @@ func main() {
 			return
 		}
 
-		var localTrackSSRC uint32 = 0
-		var localTrack *webrtc.Track = nil
+		var localVideoTrack *webrtc.Track = nil
+		var localAudioTrack *webrtc.Track = nil
 
 		peerConnection.OnTrack(func(remoteTrack *webrtc.Track, receiver *webrtc.RTPReceiver) {
 			fmt.Printf("peerConnection.OnTrack(%v)\n", remoteTrack)
@@ -184,31 +185,49 @@ func main() {
 					return
 				}
 
-				if localTrack == nil {
+				if localVideoTrack == nil {
 					fmt.Printf("remoteTrack.Read() continue.\n")
 					continue
 				}
 
-				rtpPacket.SSRC = localTrackSSRC
+				switch rtpPacket.PayloadType {
+				case localVideoTrack.PayloadType():
+					rtpPacket.SSRC = localVideoTrack.SSRC()
+				case localAudioTrack.PayloadType():
+					rtpPacket.SSRC = localAudioTrack.SSRC()
+				default:
+					continue
+				}
 
-				err = localTrack.WriteRTP(rtpPacket)
+				err = localVideoTrack.WriteRTP(rtpPacket)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "localTrack.Write() failed. %v\n", err)
+					fmt.Fprintf(os.Stderr, "localVideoTrack.Write() failed. %v\n", err)
 					return
 				}
 			}
 		})
 
-		localTrackSSRC = rand.Uint32()
-		localTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, localTrackSSRC, "video", "pion")
+		localVideoTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), "video", "pion")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "peerConnection.NewTrack() failed. %v\n", err)
+			fmt.Fprintf(os.Stderr, "peerConnection.NewTrack(VP8) failed. %v\n", err)
 			return
 		}
 
-		_, err = peerConnection.AddTrack(localTrack)
+		_, err = peerConnection.AddTrack(localVideoTrack)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "peerConnection.AddTrack() failed. %v\n", err)
+			fmt.Fprintf(os.Stderr, "peerConnection.AddTrack(Video) failed. %v\n", err)
+			return
+		}
+
+		localAudioTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeOpus, rand.Uint32(), "audio", "pion")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "peerConnection.NewTrack(OPUS) failed. %v\n", err)
+			return
+		}
+
+		_, err = peerConnection.AddTrack(localAudioTrack)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "peerConnection.AddTrack(Audio) failed. %v\n", err)
 			return
 		}
 
